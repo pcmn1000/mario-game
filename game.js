@@ -169,19 +169,28 @@ class Player {
                 } else if (this.vy < 0) {
                     this.y = p.y + p.h;
                     this.vy = 0;
+                    // ブロックを下から叩いた→バンプアニメーション
+                    if (p.type === 'brick' || p.type === 'question') {
+                        p.bumpOffset = -8;
+                        // ブロックの上にいる敵を倒す
+                        bumpKillEnemies(p);
+                    }
                     // ? ブロックを叩いたとき → 月アイテム出現
                     if (p.type === 'question' && !p.hit) {
                         p.hit = true;
                         score += 100;
                         spawnParticles(p.x + p.w / 2, p.y, 8, '#ffd700');
-                        // 月アイテムを生成
+                        // 月アイテムを生成（左右どちらかに落ちる）
+                        const dir = Math.random() < 0.5 ? -1 : 1;
                         moonItems.push({
                             x: p.x + p.w / 2 - 12,
                             y: p.y - 28,
                             w: 24,
                             h: 24,
+                            vx: dir * (1.5 + Math.random() * 1),
                             vy: -4,
                             rising: true,
+                            falling: false,
                             baseY: p.y - 32,
                             timer: 0,
                             collected: false,
@@ -283,10 +292,17 @@ class Enemy {
         this.alive = true;
         this.squishTimer = 0;
         this.animTimer = 0;
+        this.bumpedOff = false; // ブロックバンプで吹き飛ばされたか
     }
 
     update() {
         if (!this.alive) {
+            if (this.bumpedOff) {
+                // バンプで吹き飛び中：上に飛んで落下
+                this.vy += GRAVITY;
+                this.y += this.vy;
+                return this.y < getLevelHeight() + 200;
+            }
             this.squishTimer--;
             return this.squishTimer > 0;
         }
@@ -357,6 +373,17 @@ class Enemy {
         updateHUD();
     }
 
+    // ブロックバンプで吹き飛ばされる
+    bumpKill() {
+        this.alive = false;
+        this.squishTimer = 0;
+        this.bumpedOff = true;
+        this.vy = -8;
+        score += 200;
+        spawnParticles(this.x + this.w / 2, this.y, 8, '#ff6b6b');
+        updateHUD();
+    }
+
     draw() {
         const sx = this.x - camera.x;
         const sy = this.y - camera.y;
@@ -366,6 +393,23 @@ class Enemy {
         ctx.save();
 
         if (!this.alive) {
+            if (this.bumpedOff) {
+                // バンプで吹き飛ばされた: 上下反転して飛んでいく
+                ctx.save();
+                ctx.translate(sx + this.w / 2, sy + this.h / 2);
+                ctx.scale(1, -1); // 上下反転
+                if (this.type === 'goomba' && enemyImgLoaded) {
+                    ctx.drawImage(enemyImg, -20, -20, 40, 40);
+                } else {
+                    ctx.fillStyle = this.type === 'goomba' ? '#4aa3df' : '#27ae60';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 14, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+                ctx.restore();
+                return;
+            }
             // 潰れたアニメ
             ctx.globalAlpha = this.squishTimer / 20;
             if (this.type === 'goomba' && enemyImgLoaded) {
@@ -445,6 +489,23 @@ class Enemy {
         }
 
         ctx.restore();
+    }
+}
+
+// ============================================================
+// ブロックバンプで敵を倒す
+// ============================================================
+function bumpKillEnemies(platform) {
+    for (const e of enemies) {
+        if (!e.alive) continue;
+        // 敵がブロックの真上にいるか判定 (足元がブロック上面に接触)
+        const onTop = e.y + e.h >= platform.y - 4 &&
+                      e.y + e.h <= platform.y + 4 &&
+                      e.x + e.w > platform.x &&
+                      e.x < platform.x + platform.w;
+        if (onTop) {
+            e.bumpKill();
+        }
     }
 }
 
@@ -1098,9 +1159,17 @@ function drawDecorations() {
 }
 
 function drawPlatforms() {
+    // バンプアニメーション更新
+    for (const p of platforms) {
+        if (p.bumpOffset) {
+            p.bumpOffset *= 0.7;
+            if (Math.abs(p.bumpOffset) < 0.5) p.bumpOffset = 0;
+        }
+    }
+
     for (const p of platforms) {
         const sx = p.x - camera.x;
-        const sy = p.y - camera.y;
+        const sy = p.y - camera.y + (p.bumpOffset || 0);
 
         if (sx + p.w < -10 || sx > canvas.width + 10) continue;
 
@@ -1212,13 +1281,39 @@ function updateMoonItems() {
             continue;
         }
         if (m.rising) {
+            // 上昇中: 上に飛び出してから落下に転じる
             m.y += m.vy;
-            m.vy += 0.15;
+            m.x += m.vx;
+            m.vy += 0.2;
             if (m.vy >= 0) {
                 m.rising = false;
-                m.baseY = m.y;
+                m.falling = true;
+            }
+        } else if (m.falling) {
+            // 落下中: 重力で落ちて地面に着地したら停止
+            m.vy += GRAVITY * 0.5;
+            if (m.vy > MAX_FALL_SPEED) m.vy = MAX_FALL_SPEED;
+            m.y += m.vy;
+            m.x += m.vx * 0.95;
+            // プラットフォームとの衝突判定
+            for (const p of platforms) {
+                if (m.x < p.x + p.w && m.x + m.w > p.x &&
+                    m.y < p.y + p.h && m.y + m.h > p.y) {
+                    if (m.vy > 0) {
+                        m.y = p.y - m.h;
+                        m.vy = 0;
+                        m.vx = 0;
+                        m.falling = false;
+                        m.baseY = m.y;
+                    }
+                }
+            }
+            // 画面外に落ちたら削除
+            if (m.y > getLevelHeight() + 100) {
+                moonItems.splice(i, 1);
             }
         } else {
+            // 着地後: 小さく揺れる
             m.timer++;
             m.y = m.baseY + Math.sin(m.timer * 0.04) * 4;
         }
