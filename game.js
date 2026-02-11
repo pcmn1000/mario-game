@@ -1603,16 +1603,31 @@ function enterUnderground() {
     const lvl = LEVELS[currentLevel];
     if (!lvl.underground) return;
 
-    // アニメーション開始: プレイヤーがパイプに沈む → 暗転 → ワープ → 出現
-    const pipeX = player.x;
+    // 入るパイプを特定
+    let warpPipe = null;
+    for (const p of platforms) {
+        if (p.type === 'pipe' && p.warpTo === 'underground') {
+            if (player.x + player.w > p.x && player.x < p.x + p.w &&
+                Math.abs((player.y + player.h) - p.y) < 8) {
+                warpPipe = p;
+                break;
+            }
+        }
+    }
+
+    // パイプの中央に揃える
+    if (warpPipe) {
+        player.x = warpPipe.x + (warpPipe.w - player.w) / 2;
+    }
+
     const pipeY = player.y;
     warpAnim = {
         type: 'enter',
-        phase: 'sink',      // sink → fadeOut → warp → fadeIn → rise → done
+        phase: 'sink',      // sink → fadeOut → warp → fadeIn → done
         timer: 0,
         sinkY: pipeY,
-        pipeX: pipeX,
         fadeAlpha: 0,
+        warpPipe: warpPipe,  // パイプを前面描画用に保存
     };
     player.vx = 0;
     player.vy = 0;
@@ -1679,15 +1694,31 @@ function doEnterUndergroundWarp() {
 function exitUnderground() {
     if (!savedOverworld) return;
 
-    const pipeX = player.x;
+    // 出口パイプを特定
+    let warpPipe = null;
+    for (const p of platforms) {
+        if (p.type === 'pipe' && p.isExit) {
+            if (player.x + player.w > p.x && player.x < p.x + p.w &&
+                Math.abs((player.y + player.h) - p.y) < 8) {
+                warpPipe = p;
+                break;
+            }
+        }
+    }
+
+    // パイプの中央に揃える
+    if (warpPipe) {
+        player.x = warpPipe.x + (warpPipe.w - player.w) / 2;
+    }
+
     const pipeY = player.y;
     warpAnim = {
         type: 'exit',
         phase: 'sink',
         timer: 0,
         sinkY: pipeY,
-        pipeX: pipeX,
         fadeAlpha: 0,
+        warpPipe: warpPipe,  // 地下出口パイプ（sink用）
     };
     player.vx = 0;
     player.vy = 0;
@@ -1706,10 +1737,12 @@ function doExitUndergroundWarp() {
 
     let exitX = savedOverworld.playerX;
     let exitY = savedOverworld.playerY;
+    let exitPipe = null;
     for (const p of platforms) {
         if (p.type === 'pipe' && p.isExit) {
+            exitPipe = p;
             exitX = p.x + (p.w - player.w) / 2;
-            exitY = p.y - player.h - TILE; // パイプの上から出現
+            exitY = p.y;  // パイプの中（rise開始位置）
             break;
         }
     }
@@ -1718,6 +1751,13 @@ function doExitUndergroundWarp() {
     player.y = exitY;
     player.vx = 0;
     player.vy = 0;
+
+    // rise用データをwarpAnimに保存
+    if (warpAnim) {
+        warpAnim.warpPipe = exitPipe;      // 地上出口パイプ（rise用）
+        warpAnim.riseStartY = exitY;       // パイプ内の位置
+        warpAnim.riseEndY = exitPipe ? exitPipe.y - player.h : exitY; // パイプの真上
+    }
 
     camera = savedOverworld.camera;
     particles = [];
@@ -1764,12 +1804,30 @@ function updateWarpAnimation() {
         case 'fadeIn':
             // 画面が明るくなる (25フレーム)
             a.fadeAlpha = Math.max(0, 1 - a.timer / 25);
-            // プレイヤーがパイプから出てくる
-            if (a.timer <= 15) {
-                player.vy = 0;
-                player.vx = 0;
-            }
+            player.vy = 0;
+            player.vx = 0;
             if (a.timer >= 30) {
+                if (a.type === 'exit') {
+                    // 出口: パイプからせり上がる
+                    a.phase = 'rise';
+                    a.timer = 0;
+                } else {
+                    a.phase = 'done';
+                }
+            }
+            break;
+
+        case 'rise':
+            // プレイヤーがパイプから上にせり上がる (25フレーム)
+            if (a.riseStartY !== undefined && a.riseEndY !== undefined) {
+                const t = Math.min(1, a.timer / 25);
+                // イージング（スムーズに減速）
+                const eased = 1 - (1 - t) * (1 - t);
+                player.y = a.riseStartY + (a.riseEndY - a.riseStartY) * eased;
+            }
+            player.vx = 0;
+            player.vy = 0;
+            if (a.timer >= 25) {
                 a.phase = 'done';
             }
             break;
@@ -1781,6 +1839,25 @@ function updateWarpAnimation() {
             return false;
     }
     return true; // アニメーション中
+}
+
+function drawWarpPipeFront() {
+    if (!warpAnim || !warpAnim.warpPipe) return;
+    if (warpAnim.phase !== 'sink' && warpAnim.phase !== 'rise') return;
+
+    const p = warpAnim.warpPipe;
+    const sx = p.x - camera.x;
+    const sy = p.y - camera.y;
+
+    // パイプをプレイヤーの前面に再描画
+    ctx.fillStyle = '#27ae60';
+    ctx.fillRect(sx, sy, p.w, p.h);
+    // パイプの口
+    ctx.fillStyle = '#2ecc71';
+    ctx.fillRect(sx - 4, sy, p.w + 8, 12);
+    // ハイライト
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(sx + 4, sy + 12, 6, p.h - 12);
 }
 
 function drawWarpOverlay() {
@@ -1835,6 +1912,7 @@ function gameLoop() {
     for (const e of enemies) e.draw();
     if (boss) boss.draw();
     player.draw();
+    drawWarpPipeFront();  // パイプをプレイヤーの前面に描画（sink/rise中）
     drawParticles();
 
     // ワープオーバーレイ（暗転エフェクト）
