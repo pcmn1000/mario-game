@@ -32,6 +32,7 @@ let playerNickname = 'PLAYER';
 let inUnderground = false;  // 地下エリア中か
 let savedOverworld = null;  // 地上の状態保存
 let pipeWarpCooldown = 0;   // ワープ連打防止
+let warpAnim = null;        // パイプワープアニメーション状態
 let enemyImg = null;
 let enemyImgLoaded = false;
 
@@ -1602,6 +1603,26 @@ function enterUnderground() {
     const lvl = LEVELS[currentLevel];
     if (!lvl.underground) return;
 
+    // アニメーション開始: プレイヤーがパイプに沈む → 暗転 → ワープ → 出現
+    const pipeX = player.x;
+    const pipeY = player.y;
+    warpAnim = {
+        type: 'enter',
+        phase: 'sink',      // sink → fadeOut → warp → fadeIn → rise → done
+        timer: 0,
+        sinkY: pipeY,
+        pipeX: pipeX,
+        fadeAlpha: 0,
+    };
+    player.vx = 0;
+    player.vy = 0;
+    pipeWarpCooldown = 9999; // アニメ中はワープ禁止
+}
+
+function doEnterUndergroundWarp() {
+    const lvl = LEVELS[currentLevel];
+    const ug = lvl.underground;
+
     // 地上の状態を保存
     savedOverworld = {
         platforms: platforms,
@@ -1616,8 +1637,6 @@ function enterUnderground() {
         playerY: player.y,
     };
 
-    const ug = lvl.underground;
-
     // 地下エリアのプラットフォーム
     platforms = ug.platforms.map(p => ({
         x: p.x * TILE,
@@ -1628,7 +1647,6 @@ function enterUnderground() {
         hit: false,
     }));
 
-    // 出口パイプ追加
     if (ug.exitPipe) {
         platforms.push({
             x: ug.exitPipe.x * TILE,
@@ -1640,51 +1658,58 @@ function enterUnderground() {
         });
     }
 
-    // コイン
     coins = ug.coins.map(c => new Coin(c.x * TILE, c.y * TILE));
-
-    // 地下には敵なし
     enemies = [];
     goalFlag = null;
     boss = null;
     moonItems = [];
     decorations = [];
 
-    // プレイヤーを地下入口に
     player.x = ug.playerStart.x * TILE;
-    player.y = ug.playerStart.y * TILE;
+    player.y = (ug.playerStart.y - 2) * TILE; // 上から出現用
     player.vx = 0;
     player.vy = 0;
 
     camera = { x: 0, y: 0 };
     particles = [];
     inUnderground = true;
-    pipeWarpCooldown = 30;
-
-    spawnParticles(player.x + player.w / 2, player.y + player.h / 2, 15, '#27ae60');
     updateHUD();
 }
 
 function exitUnderground() {
     if (!savedOverworld) return;
 
+    const pipeX = player.x;
+    const pipeY = player.y;
+    warpAnim = {
+        type: 'exit',
+        phase: 'sink',
+        timer: 0,
+        sinkY: pipeY,
+        pipeX: pipeX,
+        fadeAlpha: 0,
+    };
+    player.vx = 0;
+    player.vy = 0;
+    pipeWarpCooldown = 9999;
+}
+
+function doExitUndergroundWarp() {
     // 地上の状態を復元
     platforms = savedOverworld.platforms;
     enemies = savedOverworld.enemies;
-    // コインは地上のものを復元（地下で取ったコインのスコアは維持）
     coins = savedOverworld.coins;
     goalFlag = savedOverworld.goalFlag;
     boss = savedOverworld.boss;
     decorations = savedOverworld.decorations;
     moonItems = savedOverworld.moonItems;
 
-    // 出口パイプ（isExit: true）の位置にプレイヤーを戻す
     let exitX = savedOverworld.playerX;
     let exitY = savedOverworld.playerY;
     for (const p of platforms) {
         if (p.type === 'pipe' && p.isExit) {
             exitX = p.x + (p.w - player.w) / 2;
-            exitY = p.y - player.h;
+            exitY = p.y - player.h - TILE; // パイプの上から出現
             break;
         }
     }
@@ -1698,10 +1723,75 @@ function exitUnderground() {
     particles = [];
     inUnderground = false;
     savedOverworld = null;
-    pipeWarpCooldown = 30;
-
-    spawnParticles(player.x + player.w / 2, player.y + player.h / 2, 15, '#27ae60');
     updateHUD();
+}
+
+function updateWarpAnimation() {
+    if (!warpAnim) return false;
+
+    const a = warpAnim;
+    a.timer++;
+
+    switch (a.phase) {
+        case 'sink':
+            // プレイヤーがパイプに沈む (30フレーム)
+            player.y = a.sinkY + (a.timer / 30) * TILE * 1.5;
+            player.vx = 0;
+            player.vy = 0;
+            if (a.timer >= 30) {
+                a.phase = 'fadeOut';
+                a.timer = 0;
+                a.fadeAlpha = 0;
+            }
+            break;
+
+        case 'fadeOut':
+            // 画面が暗くなる (20フレーム)
+            a.fadeAlpha = Math.min(1, a.timer / 20);
+            if (a.timer >= 25) {
+                // 実際のワープ処理
+                if (a.type === 'enter') {
+                    doEnterUndergroundWarp();
+                } else {
+                    doExitUndergroundWarp();
+                }
+                a.phase = 'fadeIn';
+                a.timer = 0;
+                a.fadeAlpha = 1;
+            }
+            break;
+
+        case 'fadeIn':
+            // 画面が明るくなる (25フレーム)
+            a.fadeAlpha = Math.max(0, 1 - a.timer / 25);
+            // プレイヤーがパイプから出てくる
+            if (a.timer <= 15) {
+                player.vy = 0;
+                player.vx = 0;
+            }
+            if (a.timer >= 30) {
+                a.phase = 'done';
+            }
+            break;
+
+        case 'done':
+            warpAnim = null;
+            pipeWarpCooldown = 30;
+            spawnParticles(player.x + player.w / 2, player.y + player.h / 2, 15, '#27ae60');
+            return false;
+    }
+    return true; // アニメーション中
+}
+
+function drawWarpOverlay() {
+    if (!warpAnim) return;
+    if (warpAnim.fadeAlpha > 0) {
+        ctx.save();
+        ctx.fillStyle = '#000';
+        ctx.globalAlpha = warpAnim.fadeAlpha;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
+    }
 }
 
 // ============================================================
@@ -1712,25 +1802,32 @@ function gameLoop() {
 
     animFrame++;
 
-    // 更新
-    player.update();
-    enemies = enemies.filter(e => e.update());
-    coins = coins.filter(c => c.update());
-    if (boss) boss.update();
-    updateParticles();
-    checkCollisions();
-    checkPipeWarp();
-    updateCamera();
+    // ワープアニメーション中
+    const warping = updateWarpAnimation();
 
-    // 月アイテム更新
-    updateMoonItems();
-    checkMoonCollisions();
+    if (!warping) {
+        // 通常更新
+        player.update();
+        enemies = enemies.filter(e => e.update());
+        coins = coins.filter(c => c.update());
+        if (boss) boss.update();
+        updateParticles();
+        checkCollisions();
+        checkPipeWarp();
+        updateCamera();
+
+        // 月アイテム更新
+        updateMoonItems();
+        checkMoonCollisions();
+    } else {
+        updateCamera();
+    }
 
     // 描画
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawBackground();
     drawDecorations();
-    drawGoalFlag();   // ゴールフラグを地面ブロックの背面に描画
+    drawGoalFlag();
     drawPlatforms();
 
     for (const c of coins) c.draw();
@@ -1739,6 +1836,9 @@ function gameLoop() {
     if (boss) boss.draw();
     player.draw();
     drawParticles();
+
+    // ワープオーバーレイ（暗転エフェクト）
+    drawWarpOverlay();
 
     requestAnimationFrame(gameLoop);
 }
@@ -1798,6 +1898,7 @@ function respawnPlayer() {
     particles = [];
     camera = { x: 0, y: 0 };
     pipeWarpCooldown = 0;
+    warpAnim = null;
     updateHUD();
 }
 
