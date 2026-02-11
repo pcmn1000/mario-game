@@ -22,7 +22,7 @@ let currentLevel = 0;
 let startTime = 0;
 let animFrame = 0;
 let camera = { x: 0, y: 0 };
-let keys = { left: false, right: false, jump: false, down: false };
+let keys = { left: false, right: false, jump: false, down: false, downPressed: false };
 let player, platforms, enemies, coins, decorations, goalFlag;
 let particles = [];
 let boss = null;
@@ -1571,7 +1571,8 @@ function checkPipeWarp() {
         pipeWarpCooldown--;
         return;
     }
-    if (!keys.down || !player.onGround) return;
+    if (!keys.downPressed || !player.onGround) return;
+    keys.downPressed = false; // 一度消費
 
     if (inUnderground) {
         // 地下にいる → 出口パイプを探す
@@ -2080,7 +2081,7 @@ function setupTouchControls() {
     btnJump.addEventListener('touchcancel', () => keys.jump = false);
 
     // 下ボタン
-    btnDown.addEventListener('touchstart', (e) => { e.preventDefault(); keys.down = true; });
+    btnDown.addEventListener('touchstart', (e) => { e.preventDefault(); keys.down = true; keys.downPressed = true; });
     btnDown.addEventListener('touchend', (e) => { e.preventDefault(); keys.down = false; });
     btnDown.addEventListener('touchcancel', () => keys.down = false);
 
@@ -2097,7 +2098,7 @@ function setupTouchControls() {
     btnJump.addEventListener('mouseup', () => keys.jump = false);
     btnJump.addEventListener('mouseleave', () => keys.jump = false);
 
-    btnDown.addEventListener('mousedown', () => keys.down = true);
+    btnDown.addEventListener('mousedown', () => { keys.down = true; keys.downPressed = true; });
     btnDown.addEventListener('mouseup', () => keys.down = false);
     btnDown.addEventListener('mouseleave', () => keys.down = false);
 }
@@ -2109,7 +2110,7 @@ function setupKeyboardControls() {
             case 'ArrowLeft': case 'a': keys.left = true; break;
             case 'ArrowRight': case 'd': keys.right = true; break;
             case 'ArrowUp': case 'w': case ' ': keys.jump = true; e.preventDefault(); break;
-            case 'ArrowDown': case 's': keys.down = true; break;
+            case 'ArrowDown': case 's': keys.down = true; keys.downPressed = true; break;
         }
     });
     window.addEventListener('keyup', (e) => {
