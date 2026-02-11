@@ -28,6 +28,7 @@ let particles = [];
 let boss = null;
 let moonItems = [];
 let screenShake = 0;
+let playerNickname = 'PLAYER';
 let enemyImg = null;
 let enemyImgLoaded = false;
 
@@ -1416,10 +1417,31 @@ function gameLoop() {
 }
 
 // ============================================================
+// ニックネーム入力
+// ============================================================
+function showNicknameInput() {
+    document.getElementById('title-screen').style.display = 'none';
+    document.getElementById('nickname-screen').style.display = 'flex';
+    initStarFieldFor('stars-canvas-nick');
+    const input = document.getElementById('nickname-input');
+    input.value = '';
+    setTimeout(() => input.focus(), 100);
+}
+
+function confirmNickname() {
+    const input = document.getElementById('nickname-input');
+    const name = input.value.trim().toUpperCase();
+    playerNickname = name.length > 0 ? name : 'PLAYER';
+    document.getElementById('nickname-screen').style.display = 'none';
+    startGame();
+}
+
+// ============================================================
 // 画面遷移
 // ============================================================
 function startGame() {
     document.getElementById('title-screen').style.display = 'none';
+    document.getElementById('nickname-screen').style.display = 'none';
     document.getElementById('game-container').style.display = 'flex';
     gameState = 'playing';
     score = 0;
@@ -1471,11 +1493,15 @@ function showClear() {
 
     const lvl = LEVELS[currentLevel];
     if (lvl && lvl.isBoss) {
-        document.querySelector('#clear-screen h1').textContent = '🎉 全ステージクリア！';
+        document.querySelector('#clear-screen h1').textContent = '🎉 ALL STAGE CLEAR!';
         document.querySelector('#clear-screen button').textContent = 'タイトルへ';
+        // ボスクリア時にランキング保存・表示
+        saveRanking(playerNickname, score, elapsed);
+        displayRanking();
     } else {
         document.querySelector('#clear-screen h1').textContent = '🎉 ステージクリア！';
         document.querySelector('#clear-screen button').textContent = '次のステージへ';
+        document.getElementById('ranking-container').style.display = 'none';
     }
 }
 
@@ -1485,7 +1511,6 @@ function nextLevel() {
     currentLevel++;
     if (currentLevel >= LEVELS.length) {
         // 全ステージクリア → タイトルに戻す
-        alert('🎉 全ステージクリア！おめでとう！\n最終スコア: ' + score);
         document.getElementById('game-container').style.display = 'none';
         document.getElementById('title-screen').style.display = 'flex';
         gameState = 'title';
@@ -1562,14 +1587,95 @@ window.addEventListener('DOMContentLoaded', () => {
     setupTouchControls();
     setupKeyboardControls();
     initStarField();
+    // ニックネーム入力でEnterキー対応
+    const nickInput = document.getElementById('nickname-input');
+    if (nickInput) {
+        nickInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') confirmNickname();
+        });
+    }
 });
+
+// ============================================================
+// ランキングシステム (localStorage)
+// ============================================================
+const RANKING_KEY = 'superRunnerRanking';
+const MAX_RANKING = 10;
+
+function loadRanking() {
+    try {
+        const data = localStorage.getItem(RANKING_KEY);
+        return data ? JSON.parse(data) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function saveRanking(name, playerScore, time) {
+    const rankings = loadRanking();
+    rankings.push({
+        name: name,
+        score: playerScore,
+        time: time,
+        date: new Date().toLocaleDateString('ja-JP')
+    });
+    // スコア降順ソート
+    rankings.sort((a, b) => b.score - a.score);
+    // 上位MAX_RANKING件のみ保持
+    if (rankings.length > MAX_RANKING) rankings.length = MAX_RANKING;
+    localStorage.setItem(RANKING_KEY, JSON.stringify(rankings));
+}
+
+function displayRanking() {
+    const container = document.getElementById('ranking-container');
+    const list = document.getElementById('ranking-list');
+    if (!container || !list) return;
+
+    const rankings = loadRanking();
+    container.style.display = 'block';
+    list.innerHTML = '';
+
+    if (rankings.length === 0) {
+        list.innerHTML = '<div class="ranking-row"><span style="color:#888;">NO DATA</span></div>';
+        return;
+    }
+
+    rankings.forEach((entry, i) => {
+        const row = document.createElement('div');
+        row.className = 'ranking-row';
+
+        // メダルカラー
+        if (i === 0) row.classList.add('gold');
+        else if (i === 1) row.classList.add('silver');
+        else if (i === 2) row.classList.add('bronze');
+
+        // 今回のスコアをハイライト
+        if (entry.name === playerNickname && entry.score === score) {
+            row.classList.add('current');
+        }
+
+        const rankLabel = i === 0 ? '👑' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) + '.';
+
+        row.innerHTML = `
+            <span class="ranking-rank">${rankLabel}</span>
+            <span class="ranking-name">${entry.name}</span>
+            <span class="ranking-score">${entry.score}</span>
+        `;
+        list.appendChild(row);
+    });
+}
 
 // ============================================================
 // タイトル画面 - 星背景アニメーション
 // ============================================================
 function initStarField() {
-    const canvas = document.getElementById('stars-canvas');
-    if (!canvas) return;
+    initStarFieldFor('stars-canvas');
+}
+
+function initStarFieldFor(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || canvas.dataset.initialized) return;
+    canvas.dataset.initialized = 'true';
     const ctx = canvas.getContext('2d');
     
     function resize() {
@@ -1596,8 +1702,11 @@ function initStarField() {
     }
     
     function drawStars() {
-        if (document.getElementById('title-screen').style.display === 'none') {
-            return; // タイトル非表示時は停止
+        // 親要素が非表示なら停止
+        const parent = canvas.parentElement;
+        if (parent && parent.style.display === 'none') {
+            canvas.dataset.initialized = '';
+            return;
         }
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         

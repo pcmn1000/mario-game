@@ -26,7 +26,7 @@
                 <img src="enemy.png" alt="🌍" class="title-icon">
             </div>
             <p class="retro-subtitle">- COLLECT COINS & REACH THE GOAL -</p>
-            <button id="start-btn" class="retro-btn" onclick="startGame()">
+            <button id="start-btn" class="retro-btn" onclick="showNicknameInput()">
                 <span class="btn-blink">▶ START ◀</span>
             </button>
             <div class="instructions retro-instructions">
@@ -36,6 +36,22 @@
                 <p class="retro-hint">STOMP ENEMIES TO DEFEAT THEM!</p>
             </div>
             <p class="retro-copyright">© 2026 SUPER RUNNER PROJECT</p>
+        </div>
+    </div>
+
+    <!-- ニックネーム入力画面 -->
+    <div id="nickname-screen" style="display:none;">
+        <canvas id="stars-canvas-nick"></canvas>
+        <div class="scanlines"></div>
+        <div class="title-content retro">
+            <h1 class="nickname-title">ENTER<br>YOUR NAME</h1>
+            <div class="title-decoration">═══════════════════</div>
+            <div class="nickname-form">
+                <input type="text" id="nickname-input" maxlength="10" placeholder="PLAYER" autocomplete="off" spellcheck="false">
+                <button class="retro-btn" onclick="confirmNickname()">
+                    <span>▶ OK ◀</span>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -74,10 +90,14 @@
 
     <!-- クリア画面 -->
     <div id="clear-screen" style="display:none;">
-        <div class="title-content">
+        <div class="title-content retro">
             <h1>🎉 ステージクリア！</h1>
             <p id="clear-score">スコア: 0</p>
             <p id="clear-time">クリアタイム: 0秒</p>
+            <div id="ranking-container" style="display:none;">
+                <div class="ranking-header">🏆 SCORE RANKING 🏆</div>
+                <div id="ranking-list"></div>
+            </div>
             <button onclick="nextLevel()">次のステージへ</button>
         </div>
     </div>
